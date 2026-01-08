@@ -435,6 +435,11 @@ export class AgentSession {
 		return this.agent.state.isStreaming;
 	}
 
+	/** Current retry attempt (0 if not retrying) */
+	get retryAttempt(): number {
+		return this._retryAttempt;
+	}
+
 	/**
 	 * Get the names of currently active tools.
 	 * Returns the names of tools currently set on the agent.
@@ -608,7 +613,11 @@ export class AgentSession {
 
 		// Emit before_agent_start extension event
 		if (this._extensionRunner) {
-			const result = await this._extensionRunner.emitBeforeAgentStart(expandedText, options?.images);
+			const result = await this._extensionRunner.emitBeforeAgentStart(
+				expandedText,
+				options?.images,
+				this._baseSystemPrompt,
+			);
 			// Add all custom messages from extensions
 			if (result?.messages) {
 				for (const msg of result.messages) {
@@ -622,11 +631,11 @@ export class AgentSession {
 					});
 				}
 			}
-			// Apply extension systemPromptAppend on top of base prompt
-			if (result?.systemPromptAppend) {
-				this.agent.setSystemPrompt(`${this._baseSystemPrompt}\n\n${result.systemPromptAppend}`);
+			// Apply extension-modified system prompt, or reset to base
+			if (result?.systemPrompt) {
+				this.agent.setSystemPrompt(result.systemPrompt);
 			} else {
-				// Ensure we're using the base prompt (in case previous turn had appends)
+				// Ensure we're using the base prompt (in case previous turn had modifications)
 				this.agent.setSystemPrompt(this._baseSystemPrompt);
 			}
 		}
@@ -1567,7 +1576,7 @@ export class AgentSession {
 	 */
 	abortRetry(): void {
 		this._retryAbortController?.abort();
-		this._retryAttempt = 0;
+		// Note: _retryAttempt is reset in the catch block of _autoRetry
 		this._resolveRetry();
 	}
 
