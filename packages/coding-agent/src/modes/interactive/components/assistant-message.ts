@@ -8,6 +8,7 @@ import { getMarkdownTheme, theme } from "../theme/theme.js";
 export class AssistantMessageComponent extends Container {
 	private contentContainer: Container;
 	private hideThinkingBlock: boolean;
+	private lastMessage?: AssistantMessage;
 
 	constructor(message?: AssistantMessage, hideThinkingBlock = false) {
 		super();
@@ -23,11 +24,20 @@ export class AssistantMessageComponent extends Container {
 		}
 	}
 
+	override invalidate(): void {
+		super.invalidate();
+		if (this.lastMessage) {
+			this.updateContent(this.lastMessage);
+		}
+	}
+
 	setHideThinkingBlock(hide: boolean): void {
 		this.hideThinkingBlock = hide;
 	}
 
 	updateContent(message: AssistantMessage): void {
+		this.lastMessage = message;
+
 		// Clear content container
 		this.contentContainer.clear();
 
@@ -78,8 +88,12 @@ export class AssistantMessageComponent extends Container {
 					message.errorMessage && message.errorMessage !== "Request was aborted"
 						? message.errorMessage
 						: "Operation aborted";
-				const prefix = hasVisibleContent ? "\n" : "";
-				this.contentContainer.addChild(new Text(theme.fg("error", `${prefix}${abortMessage}`), 1, 0));
+				if (hasVisibleContent) {
+					this.contentContainer.addChild(new Spacer(1));
+				} else {
+					this.contentContainer.addChild(new Spacer(1));
+				}
+				this.contentContainer.addChild(new Text(theme.fg("error", abortMessage), 1, 0));
 			} else if (message.stopReason === "error") {
 				const errorMsg = message.errorMessage || "Unknown error";
 				this.contentContainer.addChild(new Spacer(1));

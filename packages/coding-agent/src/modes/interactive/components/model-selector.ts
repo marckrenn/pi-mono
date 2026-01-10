@@ -44,6 +44,7 @@ export class ModelSelectorComponent extends Container {
 		scopedModels: ReadonlyArray<ScopedModelItem>,
 		onSelect: (model: Model<any>) => void,
 		onCancel: () => void,
+		initialSearchInput?: string,
 	) {
 		super();
 
@@ -69,6 +70,9 @@ export class ModelSelectorComponent extends Container {
 
 		// Create search input
 		this.searchInput = new Input();
+		if (initialSearchInput) {
+			this.searchInput.setValue(initialSearchInput);
+		}
 		this.searchInput.onSubmit = () => {
 			// Enter on search input selects the first filtered item
 			if (this.filteredModels[this.selectedIndex]) {
@@ -90,7 +94,11 @@ export class ModelSelectorComponent extends Container {
 
 		// Load models and do initial render
 		this.loadModels().then(() => {
-			this.updateList();
+			if (initialSearchInput) {
+				this.filterModels(initialSearchInput);
+			} else {
+				this.updateList();
+			}
 			// Request re-render after models are loaded
 			this.tui.requestRender();
 		});

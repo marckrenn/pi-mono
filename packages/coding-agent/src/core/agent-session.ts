@@ -24,7 +24,7 @@ import type {
 import type { AssistantMessage, ImageContent, Message, Model, TextContent } from "@mariozechner/pi-ai";
 import { isContextOverflow, modelsAreEqual, supportsXhigh } from "@mariozechner/pi-ai";
 import { getAuthPath } from "../config.js";
-import { type BashResult, executeBash as executeBashCommand } from "./bash-executor.js";
+import { type BashResult, executeBash as executeBashCommand, executeBashWithOperations } from "./bash-executor.js";
 import {
 	type CompactionResult,
 	calculateContextTokens,
@@ -50,6 +50,8 @@ import type { ModelRegistry } from "./model-registry.js";
 import { expandPromptTemplate, type PromptTemplate } from "./prompt-templates.js";
 import type { BranchSummaryEntry, CompactionEntry, NewSessionOptions, SessionManager } from "./session-manager.js";
 import type { SettingsManager, SkillsSettings } from "./settings-manager.js";
+import type { Skill, SkillWarning } from "./skills.js";
+import type { BashOperations } from "./tools/bash.js";
 
 /** Session-specific events that extend the core AgentEvent */
 export type AgentSessionEvent =
@@ -76,6 +78,10 @@ export interface AgentSessionConfig {
 	promptTemplates?: PromptTemplate[];
 	/** Extension runner (created in sdk.ts with wrapped tools) */
 	extensionRunner?: ExtensionRunner;
+	/** Loaded skills (already discovered by SDK) */
+	skills?: Skill[];
+	/** Skill loading warnings (already captured by SDK) */
+	skillWarnings?: SkillWarning[];
 	skillsSettings?: Required<SkillsSettings>;
 	/** Model registry for API key resolution and model discovery */
 	modelRegistry: ModelRegistry;
@@ -176,6 +182,8 @@ export class AgentSession {
 	private _extensionRunner: ExtensionRunner | undefined = undefined;
 	private _turnIndex = 0;
 
+	private _skills: Skill[];
+	private _skillWarnings: SkillWarning[];
 	private _skillsSettings: Required<SkillsSettings> | undefined;
 
 	// Model registry for API key resolution
@@ -197,6 +205,8 @@ export class AgentSession {
 		this._scopedModels = config.scopedModels ?? [];
 		this._promptTemplates = config.promptTemplates ?? [];
 		this._extensionRunner = config.extensionRunner;
+		this._skills = config.skills ?? [];
+		this._skillWarnings = config.skillWarnings ?? [];
 		this._skillsSettings = config.skillsSettings;
 		this._modelRegistry = config.modelRegistry;
 		this._toolRegistry = config.toolRegistry ?? new Map();
@@ -867,6 +877,16 @@ export class AgentSession {
 
 	get skillsSettings(): Required<SkillsSettings> | undefined {
 		return this._skillsSettings;
+	}
+
+	/** Skills loaded by SDK (empty if --no-skills or skills: [] was passed) */
+	get skills(): readonly Skill[] {
+		return this._skills;
+	}
+
+	/** Skill loading warnings captured by SDK */
+	get skillWarnings(): readonly SkillWarning[] {
+		return this._skillWarnings;
 	}
 
 	/**
@@ -1617,48 +1637,60 @@ export class AgentSession {
 	 * @param command The bash command to execute
 	 * @param onChunk Optional streaming callback for output
 	 * @param options.excludeFromContext If true, command output won't be sent to LLM (!! prefix)
+	 * @param options.operations Custom BashOperations for remote execution
 	 */
 	async executeBash(
 		command: string,
 		onChunk?: (chunk: string) => void,
-		options?: { excludeFromContext?: boolean },
+		options?: { excludeFromContext?: boolean; operations?: BashOperations },
 	): Promise<BashResult> {
 		this._bashAbortController = new AbortController();
 
 		try {
-			const result = await executeBashCommand(command, {
-				onChunk,
-				signal: this._bashAbortController.signal,
-			});
+			const result = options?.operations
+				? await executeBashWithOperations(command, process.cwd(), options.operations, {
+						onChunk,
+						signal: this._bashAbortController.signal,
+					})
+				: await executeBashCommand(command, {
+						onChunk,
+						signal: this._bashAbortController.signal,
+					});
 
-			// Create and save message
-			const bashMessage: BashExecutionMessage = {
-				role: "bashExecution",
-				command,
-				output: result.output,
-				exitCode: result.exitCode,
-				cancelled: result.cancelled,
-				truncated: result.truncated,
-				fullOutputPath: result.fullOutputPath,
-				timestamp: Date.now(),
-				excludeFromContext: options?.excludeFromContext,
-			};
-
-			// If agent is streaming, defer adding to avoid breaking tool_use/tool_result ordering
-			if (this.isStreaming) {
-				// Queue for later - will be flushed on agent_end
-				this._pendingBashMessages.push(bashMessage);
-			} else {
-				// Add to agent state immediately
-				this.agent.appendMessage(bashMessage);
-
-				// Save to session
-				this.sessionManager.appendMessage(bashMessage);
-			}
-
+			this.recordBashResult(command, result, options);
 			return result;
 		} finally {
 			this._bashAbortController = undefined;
+		}
+	}
+
+	/**
+	 * Record a bash execution result in session history.
+	 * Used by executeBash and by extensions that handle bash execution themselves.
+	 */
+	recordBashResult(command: string, result: BashResult, options?: { excludeFromContext?: boolean }): void {
+		const bashMessage: BashExecutionMessage = {
+			role: "bashExecution",
+			command,
+			output: result.output,
+			exitCode: result.exitCode,
+			cancelled: result.cancelled,
+			truncated: result.truncated,
+			fullOutputPath: result.fullOutputPath,
+			timestamp: Date.now(),
+			excludeFromContext: options?.excludeFromContext,
+		};
+
+		// If agent is streaming, defer adding to avoid breaking tool_use/tool_result ordering
+		if (this.isStreaming) {
+			// Queue for later - will be flushed on agent_end
+			this._pendingBashMessages.push(bashMessage);
+		} else {
+			// Add to agent state immediately
+			this.agent.appendMessage(bashMessage);
+
+			// Save to session
+			this.sessionManager.appendMessage(bashMessage);
 		}
 	}
 

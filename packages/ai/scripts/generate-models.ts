@@ -27,6 +27,9 @@ interface ModelsDevModel {
 	modalities?: {
 		input?: string[];
 	};
+	provider?: {
+		npm?: string;
+	};
 }
 
 const COPILOT_STATIC_HEADERS = {
@@ -300,6 +303,57 @@ async function loadModelsDevData(): Promise<Model<any>[]> {
 					api: "openai-completions",
 					provider: "mistral",
 					baseUrl: "https://api.mistral.ai/v1",
+					reasoning: m.reasoning === true,
+					input: m.modalities?.input?.includes("image") ? ["text", "image"] : ["text"],
+					cost: {
+						input: m.cost?.input || 0,
+						output: m.cost?.output || 0,
+						cacheRead: m.cost?.cache_read || 0,
+						cacheWrite: m.cost?.cache_write || 0,
+					},
+					contextWindow: m.limit?.context || 4096,
+					maxTokens: m.limit?.output || 4096,
+				});
+			}
+		}
+
+		// Process OpenCode Zen models
+		// API mapping based on provider.npm field:
+		// - @ai-sdk/openai → openai-responses
+		// - @ai-sdk/anthropic → anthropic-messages
+		// - @ai-sdk/google → google-generative-ai
+		// - null/undefined/@ai-sdk/openai-compatible → openai-completions
+		if (data.opencode?.models) {
+			for (const [modelId, model] of Object.entries(data.opencode.models)) {
+				const m = model as ModelsDevModel;
+				if (m.tool_call !== true) continue;
+
+				const npm = m.provider?.npm;
+				let api: Api;
+				let baseUrl: string;
+
+				if (npm === "@ai-sdk/openai") {
+					api = "openai-responses";
+					baseUrl = "https://opencode.ai/zen/v1";
+				} else if (npm === "@ai-sdk/anthropic") {
+					api = "anthropic-messages";
+					// Anthropic SDK appends /v1/messages to baseURL
+					baseUrl = "https://opencode.ai/zen";
+				} else if (npm === "@ai-sdk/google") {
+					api = "google-generative-ai";
+					baseUrl = "https://opencode.ai/zen/v1";
+				} else {
+					// null, undefined, or @ai-sdk/openai-compatible
+					api = "openai-completions";
+					baseUrl = "https://opencode.ai/zen/v1";
+				}
+
+				models.push({
+					id: modelId,
+					name: m.name || modelId,
+					api,
+					provider: "opencode",
+					baseUrl,
 					reasoning: m.reasoning === true,
 					input: m.modalities?.input?.includes("image") ? ["text", "image"] : ["text"],
 					cost: {
@@ -635,7 +689,8 @@ async function generateModels() {
 			baseUrl: ANTIGRAVITY_ENDPOINT,
 			reasoning: true,
 			input: ["text", "image"],
-			cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
+			// the Model type doesn't seem to support having extended-context costs, so I'm just using the pricing for <200k input
+			cost: { input: 2, output: 12, cacheRead: 0.2, cacheWrite: 2.375 },
 			contextWindow: 1048576,
 			maxTokens: 65535,
 		},
@@ -647,7 +702,8 @@ async function generateModels() {
 			baseUrl: ANTIGRAVITY_ENDPOINT,
 			reasoning: true,
 			input: ["text", "image"],
-			cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
+			// the Model type doesn't seem to support having extended-context costs, so I'm just using the pricing for <200k input
+			cost: { input: 2, output: 12, cacheRead: 0.2, cacheWrite: 2.375 },
 			contextWindow: 1048576,
 			maxTokens: 65535,
 		},
@@ -659,7 +715,7 @@ async function generateModels() {
 			baseUrl: ANTIGRAVITY_ENDPOINT,
 			reasoning: true,
 			input: ["text", "image"],
-			cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
+			cost: { input: 0.5, output: 3, cacheRead: 0.5, cacheWrite: 0 },
 			contextWindow: 1048576,
 			maxTokens: 65535,
 		},
@@ -671,7 +727,7 @@ async function generateModels() {
 			baseUrl: ANTIGRAVITY_ENDPOINT,
 			reasoning: false,
 			input: ["text", "image"],
-			cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
+			cost: { input: 3, output: 15, cacheRead: 0.3, cacheWrite: 3.75 },
 			contextWindow: 200000,
 			maxTokens: 64000,
 		},
@@ -683,7 +739,7 @@ async function generateModels() {
 			baseUrl: ANTIGRAVITY_ENDPOINT,
 			reasoning: true,
 			input: ["text", "image"],
-			cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
+			cost: { input: 3, output: 15, cacheRead: 0.3, cacheWrite: 3.75 },
 			contextWindow: 200000,
 			maxTokens: 64000,
 		},
@@ -695,7 +751,7 @@ async function generateModels() {
 			baseUrl: ANTIGRAVITY_ENDPOINT,
 			reasoning: true,
 			input: ["text", "image"],
-			cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
+			cost: { input: 5, output: 25, cacheRead: 0.5, cacheWrite: 6.25 },
 			contextWindow: 200000,
 			maxTokens: 64000,
 		},
@@ -707,7 +763,7 @@ async function generateModels() {
 			baseUrl: ANTIGRAVITY_ENDPOINT,
 			reasoning: false,
 			input: ["text"],
-			cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
+			cost: { input: 0.09, output: 0.36, cacheRead: 0, cacheWrite: 0 },
 			contextWindow: 131072,
 			maxTokens: 32768,
 		},

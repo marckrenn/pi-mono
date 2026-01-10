@@ -19,7 +19,7 @@ read README.md, then ask which module(s) to work on. Based on the answer, read t
 - Always ask before removing functionality or code that appears to be intentional
 
 ## Commands
-- After code changes (not documentation changes): `npm run check` (get full output, no tail)
+- After code changes (not documentation changes): `npm run check` (get full output, no tail). Fix all errors, warnings, and infos before committing.
 - NEVER run: `npm run dev`, `npm run build`, `npm test`
 - Only run specific tests if user instructs: `npm test -- test/specific.test.ts`
 - NEVER commit unless user asks
@@ -36,6 +36,11 @@ When creating issues:
 When closing issues via commit:
 - Include `fixes #<number>` or `closes #<number>` in the commit message
 - This automatically closes the issue when the commit is merged
+
+## PR Workflow
+- Analyze PRs without pulling locally first
+- If the user approves: create a feature branch, pull PR, rebase on main, apply adjustments, commit, merge into main, push, close PR, and leave a comment in the user's tone
+- You never open PRs yourself. We work in feature branches until everything is according to the user's requirements, then merge into main, and push.
 
 ## Tools
 - GitHub CLI for issues/PRs
