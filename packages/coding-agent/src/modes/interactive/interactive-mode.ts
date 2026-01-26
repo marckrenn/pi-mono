@@ -227,6 +227,10 @@ export class InteractiveMode {
 	private widgetContainerAbove!: Container;
 	private widgetContainerBelow!: Container;
 
+	// Editor picker state (used for widget spacing)
+	private isSelectorVisible = false;
+	private isAutocompleteVisible = false;
+
 	// Custom footer from extension (undefined = use built-in footer)
 	private customFooter: (Component & { dispose?(): void }) | undefined = undefined;
 
@@ -262,6 +266,9 @@ export class InteractiveMode {
 		this.keybindings = KeybindingsManager.create();
 		const editorPaddingX = this.settingsManager.getEditorPaddingX();
 		this.defaultEditor = new CustomEditor(this.ui, getEditorTheme(), this.keybindings, { paddingX: editorPaddingX });
+		this.defaultEditor.onAutocompleteVisibilityChange = (visible) => {
+			this.setAutocompleteVisible(visible);
+		};
 		this.editor = this.defaultEditor;
 		this.editorContainer = new Container();
 		this.editorContainer.addChild(this.editor as Component);
@@ -1219,13 +1226,39 @@ export class InteractiveMode {
 	// Maximum total widget lines to prevent viewport overflow
 	private static readonly MAX_WIDGET_LINES = 10;
 
+	private setSelectorVisible(visible: boolean): void {
+		if (this.isSelectorVisible === visible) return;
+		this.isSelectorVisible = visible;
+		this.renderWidgets();
+	}
+
+	private setAutocompleteVisible(visible: boolean): void {
+		if (this.isAutocompleteVisible === visible) return;
+		this.isAutocompleteVisible = visible;
+		this.renderWidgets();
+	}
+
+	private syncAutocompleteVisibility(): void {
+		const editor = this.editor as { isShowingAutocomplete?: () => boolean };
+		if (typeof editor.isShowingAutocomplete === "function") {
+			this.setAutocompleteVisible(editor.isShowingAutocomplete());
+		} else {
+			this.setAutocompleteVisible(false);
+		}
+	}
+
 	/**
 	 * Render all extension widgets to the widget container.
 	 */
 	private renderWidgets(): void {
 		if (!this.widgetContainerAbove || !this.widgetContainerBelow) return;
 		this.renderWidgetContainer(this.widgetContainerAbove, this.extensionWidgetsAbove, true, true);
-		this.renderWidgetContainer(this.widgetContainerBelow, this.extensionWidgetsBelow, false, false);
+		this.renderWidgetContainer(
+			this.widgetContainerBelow,
+			this.extensionWidgetsBelow,
+			false,
+			this.isSelectorVisible || this.isAutocompleteVisible,
+		);
 		this.ui.requestRender();
 	}
 
@@ -1408,6 +1441,7 @@ export class InteractiveMode {
 				{ tui: this.ui, timeout: opts?.timeout },
 			);
 
+			this.setSelectorVisible(true);
 			this.editorContainer.clear();
 			this.editorContainer.addChild(this.extensionSelector);
 			this.ui.setFocus(this.extensionSelector);
@@ -1420,8 +1454,10 @@ export class InteractiveMode {
 	 */
 	private hideExtensionSelector(): void {
 		this.extensionSelector?.dispose();
+		this.setSelectorVisible(false);
 		this.editorContainer.clear();
 		this.editorContainer.addChild(this.editor);
+		this.syncAutocompleteVisibility();
 		this.extensionSelector = undefined;
 		this.ui.setFocus(this.editor);
 		this.ui.requestRender();
@@ -1489,6 +1525,7 @@ export class InteractiveMode {
 		this.extensionInput?.dispose();
 		this.editorContainer.clear();
 		this.editorContainer.addChild(this.editor);
+		this.syncAutocompleteVisibility();
 		this.extensionInput = undefined;
 		this.ui.setFocus(this.editor);
 		this.ui.requestRender();
@@ -1527,6 +1564,7 @@ export class InteractiveMode {
 	private hideExtensionEditor(): void {
 		this.editorContainer.clear();
 		this.editorContainer.addChild(this.editor);
+		this.syncAutocompleteVisibility();
 		this.extensionEditor = undefined;
 		this.ui.setFocus(this.editor);
 		this.ui.requestRender();
@@ -1568,6 +1606,13 @@ export class InteractiveMode {
 				newEditor.setAutocompleteProvider(this.autocompleteProvider);
 			}
 
+			const editorWithAutocomplete = newEditor as { onAutocompleteVisibilityChange?: (visible: boolean) => void };
+			if ("onAutocompleteVisibilityChange" in editorWithAutocomplete) {
+				editorWithAutocomplete.onAutocompleteVisibilityChange = (visible) => {
+					this.setAutocompleteVisible(visible);
+				};
+			}
+
 			// If extending CustomEditor, copy app-level handlers
 			// Use duck typing since instanceof fails across jiti module boundaries
 			const customEditor = newEditor as unknown as Record<string, unknown>;
@@ -1590,6 +1635,7 @@ export class InteractiveMode {
 		}
 
 		this.editorContainer.addChild(this.editor as Component);
+		this.syncAutocompleteVisibility();
 		this.ui.setFocus(this.editor as Component);
 		this.ui.requestRender();
 	}
@@ -1627,6 +1673,7 @@ export class InteractiveMode {
 		const restoreEditor = () => {
 			this.editorContainer.clear();
 			this.editorContainer.addChild(this.editor);
+			this.syncAutocompleteVisibility();
 			this.editor.setText(savedText);
 			this.ui.setFocus(this.editor);
 			this.ui.requestRender();
@@ -2935,11 +2982,14 @@ export class InteractiveMode {
 	 */
 	private showSelector(create: (done: () => void) => { component: Component; focus: Component }): void {
 		const done = () => {
+			this.setSelectorVisible(false);
 			this.editorContainer.clear();
 			this.editorContainer.addChild(this.editor);
+			this.syncAutocompleteVisibility();
 			this.ui.setFocus(this.editor);
 		};
 		const { component, focus } = create(done);
+		this.setSelectorVisible(true);
 		this.editorContainer.clear();
 		this.editorContainer.addChild(component);
 		this.ui.setFocus(focus);
